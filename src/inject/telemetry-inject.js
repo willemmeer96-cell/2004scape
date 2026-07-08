@@ -37,6 +37,10 @@
     // instance under. Add your own local build's hook name here if it
     // differs -- see the module comment above.
     resolverPaths: ["__gameState", "game", "client"],
+    // Relative path: resolves against the page's own origin, which is
+    // the gateway itself (it served this page), never the proxied
+    // upstream application.
+    reportUrl: "/__telemetry/ingest",
   };
 
   var state = {
@@ -127,6 +131,43 @@
     };
   }
 
+  // True while a report POST is in flight, so a slow/hung request never
+  // piles up a queue of overlapping fetches against the gateway.
+  var reportInFlight = false;
+
+  function reportSnapshot(snapshot) {
+    if (reportInFlight) {
+      return;
+    }
+    if (typeof global.fetch !== "function") {
+      return;
+    }
+
+    try {
+      reportInFlight = true;
+      global
+        .fetch(CONFIG.reportUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(snapshot),
+        })
+        .catch(function (err) {
+          // Gateway unreachable, page still loading, offline, etc. --
+          // the dashboard just shows stale data until the next tick
+          // succeeds. Never let this surface as an unhandled rejection.
+          console.error("[telemetry] failed to report snapshot:", err);
+        })
+        .then(function () {
+          reportInFlight = false;
+        });
+    } catch (err) {
+      // Synchronous throw from fetch() itself (e.g. a blocked/mocked
+      // implementation) -- same rule: log and move on.
+      reportInFlight = false;
+      console.error("[telemetry] failed to start report request:", err);
+    }
+  }
+
   function tick() {
     try {
       var instance = resolveGameInstance();
@@ -145,6 +186,8 @@
       state.status = "connected";
       state.lastUpdatedAt = snapshot.capturedAt;
       state.lastError = null;
+
+      reportSnapshot(snapshot);
     } catch (err) {
       // A shape mismatch or a read racing a mid-frame mutation must never
       // tear the polling loop down. Record the error for debugging and

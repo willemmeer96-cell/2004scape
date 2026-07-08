@@ -1,24 +1,39 @@
 /**
  * official-proxy mode entry point.
  *
- * Combines the HTTP handler (http.ts) and the WebSocket tunnel
- * (websocket.ts) into a single mode object shaped for Bun.serve, which
- * requires `fetch` and `websocket` on the same options object. The
- * incoming request is routed to the WS tunnel when it's an upgrade
- * request, otherwise to the regular HTTP proxy handler.
+ * Combines three request paths into a single mode object shaped for
+ * Bun.serve (which requires `fetch` and `websocket` on the same options
+ * object):
+ *
+ *  1. /__telemetry/*  -- the local dashboard's own API + UI. Handled
+ *     entirely by the gateway, never forwarded upstream.
+ *  2. WebSocket upgrades -- tunneled to the proxied application.
+ *  3. everything else -- the regular HTTP/HTML proxy handler.
+ *
+ * Order matters: telemetry routes are checked first so they can never be
+ * shadowed by an upstream path of the same name.
  */
 
 import type { Server } from "bun";
 import type { GatewayConfig } from "../../config";
+import { createTelemetryApiHandler } from "../../telemetry/api";
 import { createHttpProxyHandler } from "./http";
 import { createWebSocketProxy, type TunnelSocketData } from "./websocket";
 
 export function createOfficialProxyMode(config: GatewayConfig) {
+  const handleTelemetry = createTelemetryApiHandler();
   const handleHttp = createHttpProxyHandler(config);
   const wsProxy = createWebSocketProxy(config);
 
   return {
-    fetch(request: Request, server: Server<TunnelSocketData>): Response | undefined | Promise<Response> {
+    async fetch(request: Request, server: Server<TunnelSocketData>): Promise<Response | undefined> {
+      const url = new URL(request.url);
+
+      const telemetryResponse = await handleTelemetry(request, url.pathname);
+      if (telemetryResponse) {
+        return telemetryResponse;
+      }
+
       const upgradeResult = wsProxy.tryUpgrade(request, server);
       if (upgradeResult === true) {
         // Bun has taken over the connection; no HTTP response to return.

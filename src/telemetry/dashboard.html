@@ -1,0 +1,589 @@
+<title>Telemetry Dashboard</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* Defined on :root (not .viz-root) so `body`, an ancestor of
+     .viz-root in the DOM, can also read these via inheritance. */
+  :root {
+    --page-plane: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.1);
+
+    --series-local: #2a78d6; /* categorical slot 1: blue */
+    --series-players: #1baf7a; /* categorical slot 2: aqua */
+    --series-npcs: #eda100; /* categorical slot 3: yellow */
+
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-plane: #0d0d0d;
+      --surface-1: #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.1);
+
+      --series-local: #3987e5;
+      --series-players: #199e70;
+      --series-npcs: #c98500;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .viz-root {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 24px 20px 64px;
+  }
+
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin: 0 0 24px;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+
+  .stat-tile .label {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .stat-tile .value {
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 4px;
+    font-variant-numeric: proportional-nums;
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .card-header h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .legend .item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legend .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  button.toggle {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button.toggle:hover {
+    color: var(--text-primary);
+  }
+
+  #minimap-wrap {
+    position: relative;
+  }
+
+  svg#minimap {
+    width: 100%;
+    height: 420px;
+    display: block;
+  }
+
+  .grid-line {
+    stroke: var(--gridline);
+    stroke-width: 1;
+  }
+
+  .marker-ring {
+    stroke: var(--surface-1);
+    stroke-width: 2;
+  }
+
+  .hit-area {
+    fill: transparent;
+    cursor: pointer;
+  }
+
+  #tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    display: none;
+    white-space: nowrap;
+  }
+
+  #tooltip .tt-value {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  #tooltip .tt-label {
+    color: var(--text-secondary);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--gridline);
+  }
+
+  th {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  td.num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .empty-state {
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 24px 0;
+    text-align: center;
+  }
+</style>
+
+<div class="viz-root">
+  <h1>Telemetry Dashboard</h1>
+  <p class="subtitle">Live snapshot from the injected client hook, via the local gateway.</p>
+
+  <div class="stat-row">
+    <div class="stat-tile">
+      <div class="label">Status</div>
+      <div class="value"><span id="status-dot" class="status-dot"></span><span id="status-text">-</span></div>
+    </div>
+    <div class="stat-tile">
+      <div class="label">Players nearby</div>
+      <div class="value" id="player-count">0</div>
+    </div>
+    <div class="stat-tile">
+      <div class="label">NPCs nearby</div>
+      <div class="value" id="npc-count">0</div>
+    </div>
+    <div class="stat-tile">
+      <div class="label">Last update</div>
+      <div class="value" id="last-update">-</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Minimap</h2>
+      <div class="legend">
+        <span class="item"><span class="swatch" style="background: var(--series-local)"></span>Local player</span>
+        <span class="item"><span class="swatch" style="background: var(--series-players)"></span>Players</span>
+        <span class="item"><span class="swatch" style="background: var(--series-npcs)"></span>NPCs</span>
+      </div>
+    </div>
+    <div id="minimap-wrap">
+      <svg id="minimap" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <div id="minimap-empty" class="empty-state" style="display: none">
+      Waiting for the client hook (window.__gameState) to appear&hellip;
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Entities</h2>
+      <button class="toggle" id="table-toggle" type="button">Show table</button>
+    </div>
+    <div id="table-wrap" style="display: none">
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>x</th>
+            <th>z</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    "use strict";
+
+    var statusColors = {
+      connected: "var(--status-good)",
+      "waiting-for-client": "var(--status-warning)",
+      "lost-client": "var(--status-critical)",
+    };
+
+    var statusDot = document.getElementById("status-dot");
+    var statusText = document.getElementById("status-text");
+    var playerCountEl = document.getElementById("player-count");
+    var npcCountEl = document.getElementById("npc-count");
+    var lastUpdateEl = document.getElementById("last-update");
+    var svg = document.getElementById("minimap");
+    var minimapEmpty = document.getElementById("minimap-empty");
+    var tooltip = document.getElementById("tooltip");
+    var tableWrap = document.getElementById("table-wrap");
+    var tableBody = document.getElementById("table-body");
+    var tableToggle = document.getElementById("table-toggle");
+
+    var showTable = false;
+    tableToggle.addEventListener("click", function () {
+      showTable = !showTable;
+      tableWrap.style.display = showTable ? "block" : "none";
+      tableToggle.textContent = showTable ? "Hide table" : "Show table";
+    });
+
+    function clearChildren(node) {
+      while (node.firstChild) {
+        node.removeChild(node.firstChild);
+      }
+    }
+
+    function formatRelativeTime(timestampMs) {
+      if (!timestampMs) return "-";
+      var deltaSeconds = Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+      if (deltaSeconds < 2) return "just now";
+      if (deltaSeconds < 60) return deltaSeconds + "s ago";
+      return Math.round(deltaSeconds / 60) + "m ago";
+    }
+
+    function svgEl(tag, attrs) {
+      var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (var key in attrs) {
+        el.setAttribute(key, attrs[key]);
+      }
+      return el;
+    }
+
+    function computeViewport(points) {
+      // Auto-fit around whatever coordinates we actually have. `points`
+      // always contains at least the local player (callers only reach
+      // here once that exists), so there's no need to seed the box with
+      // a fake (0,0) -- doing so used to drag distant real coordinates
+      // into a corner of the map.
+      var minX = points[0].x,
+        maxX = points[0].x,
+        minZ = points[0].z,
+        maxZ = points[0].z;
+      for (var i = 1; i < points.length; i++) {
+        minX = Math.min(minX, points[i].x);
+        maxX = Math.max(maxX, points[i].x);
+        minZ = Math.min(minZ, points[i].z);
+        maxZ = Math.max(maxZ, points[i].z);
+      }
+      var spanX = Math.max(maxX - minX, 1);
+      var spanZ = Math.max(maxZ - minZ, 1);
+      var span = Math.max(spanX, spanZ) * 1.3 + 20; // padding, square aspect
+      var centerX = (minX + maxX) / 2;
+      var centerZ = (minZ + maxZ) / 2;
+      return { minX: centerX - span / 2, minZ: centerZ - span / 2, span: span };
+    }
+
+    function project(point, viewport) {
+      var px = ((point.x - viewport.minX) / viewport.span) * 400;
+      var pz = ((point.z - viewport.minZ) / viewport.span) * 400;
+      return { px: px, pz: pz };
+    }
+
+    function showTooltip(evt, label, point) {
+      tooltip.style.display = "block";
+      clearChildren(tooltip);
+
+      var valueEl = document.createElement("div");
+      valueEl.className = "tt-value";
+      valueEl.textContent = "x: " + point.x + ", z: " + point.z;
+
+      var labelEl = document.createElement("div");
+      labelEl.className = "tt-label";
+      labelEl.textContent = label;
+
+      tooltip.appendChild(valueEl);
+      tooltip.appendChild(labelEl);
+
+      var wrapRect = document.getElementById("minimap-wrap").getBoundingClientRect();
+      tooltip.style.left = evt.clientX - wrapRect.left + 12 + "px";
+      tooltip.style.top = evt.clientY - wrapRect.top + 12 + "px";
+    }
+
+    function hideTooltip() {
+      tooltip.style.display = "none";
+    }
+
+    function addMarker(point, viewport, color, label, radius) {
+      var projected = project(point, viewport);
+
+      var ring = svgEl("circle", {
+        cx: projected.px,
+        cy: projected.pz,
+        r: radius,
+        fill: color,
+        class: "marker-ring",
+      });
+      svg.appendChild(ring);
+
+      // Hit target well beyond the painted marker so hover/focus is easy
+      // to land, per the dataviz interaction spec (>=24px effective hit area).
+      var hit = svgEl("circle", {
+        cx: projected.px,
+        cy: projected.pz,
+        r: Math.max(radius, 12),
+        class: "hit-area",
+        tabindex: "0",
+      });
+      hit.addEventListener("pointermove", function (evt) {
+        showTooltip(evt, label, point);
+      });
+      hit.addEventListener("pointerleave", hideTooltip);
+      hit.addEventListener("focus", function () {
+        tooltip.style.display = "block";
+        clearChildren(tooltip);
+        var valueEl = document.createElement("div");
+        valueEl.className = "tt-value";
+        valueEl.textContent = "x: " + point.x + ", z: " + point.z;
+        var labelEl = document.createElement("div");
+        labelEl.className = "tt-label";
+        labelEl.textContent = label;
+        tooltip.appendChild(valueEl);
+        tooltip.appendChild(labelEl);
+      });
+      hit.addEventListener("blur", hideTooltip);
+      svg.appendChild(hit);
+    }
+
+    function renderGrid(viewport) {
+      var step = viewport.span / 8;
+      for (var i = 1; i < 8; i++) {
+        var pos = (i / 8) * 400;
+        svg.appendChild(svgEl("line", { x1: pos, y1: 0, x2: pos, y2: 400, class: "grid-line" }));
+        svg.appendChild(svgEl("line", { x1: 0, y1: pos, x2: 400, y2: pos, class: "grid-line" }));
+      }
+    }
+
+    function renderTable(snapshot) {
+      clearChildren(tableBody);
+
+      function addRow(type, point) {
+        var tr = document.createElement("tr");
+        var typeCell = document.createElement("td");
+        typeCell.textContent = type;
+        var xCell = document.createElement("td");
+        xCell.className = "num";
+        xCell.textContent = String(point.x);
+        var zCell = document.createElement("td");
+        zCell.className = "num";
+        zCell.textContent = String(point.z);
+        tr.appendChild(typeCell);
+        tr.appendChild(xCell);
+        tr.appendChild(zCell);
+        tableBody.appendChild(tr);
+      }
+
+      if (snapshot.localPlayer) {
+        addRow("Local player", snapshot.localPlayer);
+      }
+      snapshot.players.forEach(function (p) {
+        addRow("Player", p);
+      });
+      snapshot.npcs.forEach(function (n) {
+        addRow("NPC", n);
+      });
+    }
+
+    function render(envelope) {
+      var snapshot = envelope && envelope.snapshot;
+
+      playerCountEl.textContent = snapshot ? String(snapshot.players.length) : "0";
+      npcCountEl.textContent = snapshot ? String(snapshot.npcs.length) : "0";
+      lastUpdateEl.textContent = formatRelativeTime(envelope && envelope.receivedAt);
+
+      clearChildren(svg);
+      hideTooltip();
+
+      if (!snapshot || !snapshot.localPlayer) {
+        minimapEmpty.style.display = "block";
+        svg.style.display = "none";
+      } else {
+        minimapEmpty.style.display = "none";
+        svg.style.display = "block";
+
+        var points = [snapshot.localPlayer].concat(snapshot.players, snapshot.npcs);
+        var viewport = computeViewport(points);
+
+        renderGrid(viewport);
+
+        snapshot.npcs.forEach(function (n) {
+          addMarker(n, viewport, "var(--series-npcs)", "NPC", 5);
+        });
+        snapshot.players.forEach(function (p) {
+          addMarker(p, viewport, "var(--series-players)", "Player", 5);
+        });
+        addMarker(snapshot.localPlayer, viewport, "var(--series-local)", "Local player", 6);
+      }
+
+      renderTable(snapshot || { localPlayer: null, players: [], npcs: [] });
+    }
+
+    function setStatus(status) {
+      var color = statusColors[status] || "var(--text-muted)";
+      statusDot.style.background = color;
+      statusText.textContent = status || "unknown";
+    }
+
+    var lastEnvelope = null;
+
+    function refreshClock() {
+      if (lastEnvelope) {
+        lastUpdateEl.textContent = formatRelativeTime(lastEnvelope.receivedAt);
+      }
+    }
+    setInterval(refreshClock, 1000);
+
+    function handleEnvelope(envelope) {
+      lastEnvelope = envelope;
+      setStatus(envelope && envelope.snapshot && envelope.snapshot.localPlayer ? "connected" : "waiting-for-client");
+      render(envelope);
+    }
+
+    function startPolling() {
+      function poll() {
+        fetch("/__telemetry/snapshot")
+          .then(function (res) {
+            return res.json();
+          })
+          .then(function (envelope) {
+            handleEnvelope(envelope);
+          })
+          .catch(function () {
+            setStatus("lost-client");
+          });
+      }
+      poll();
+      setInterval(poll, 1000);
+    }
+
+    setStatus("waiting-for-client");
+    render(null);
+
+    if (typeof EventSource !== "undefined") {
+      try {
+        var source = new EventSource("/__telemetry/stream");
+        source.onmessage = function (evt) {
+          try {
+            handleEnvelope(JSON.parse(evt.data));
+          } catch (err) {
+            console.error("[dashboard] failed to parse SSE payload:", err);
+          }
+        };
+        source.onerror = function () {
+          // EventSource retries on its own; fall back to polling only if
+          // it never manages to connect at all.
+          if (source.readyState === EventSource.CLOSED) {
+            startPolling();
+          }
+        };
+      } catch (err) {
+        console.error("[dashboard] EventSource unavailable, falling back to polling:", err);
+        startPolling();
+      }
+    } else {
+      startPolling();
+    }
+  })();
+</script>
