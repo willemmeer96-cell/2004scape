@@ -1,22 +1,53 @@
-# dev-dashboard-gateway
+# lostcity-automation
 
 Lokale Node.js/Bun reverse-proxy/gateway voor een telemetrie-omgeving rond
-een legacy HTML5/Canvas-applicatie die via WebSockets communiceert. Draait
-losstaand naast de rest van deze repo (Java/Gradle) en heeft geen invloed
-op de Gradle build.
+een **lokaal/privé gehoste** HTML5/Canvas-applicatie (bijv. een lokale
+2004scape/LostCity-emulator) die via WebSockets communiceert. Losstaand
+project, bewust gescheiden gehouden van andere repositories (poort- en
+git-conflicten).
+
+Bedoeld voor gebruik tegen een eigen lokale/private dev- en testomgeving,
+niet tegen een live publieke multiplayer-server.
 
 ## Status
 
-Deze eerste fase levert alleen de **stabiele proxy-infrastructuur**: een
-`official-proxy`-modus die de externe applicatie ongewijzigd doorserveert,
-met een foutveilige middleware die een lokaal telemetrie-script in de HTML
-injecteert. Er wordt nog geen applicatiedata uitgelezen — dat volgt in een
-latere stap.
+- **Proxy-infrastructuur**: `official-proxy`-modus die de applicatie
+  ongewijzigd doorserveert, met een foutveilige middleware die een lokaal
+  telemetrie-script in de HTML injecteert (HTTP) en een raw WebSocket-tunnel
+  voor het WS-verkeer.
+- **Telemetrie-uitlezing** (`src/inject/telemetry-inject.js`): leest,
+  indien beschikbaar, spelercoördinaten en actieve entities uit het
+  runtime-geheugen van de client. Zie de belangrijke kanttekening hieronder
+  over hoe dit werkt bij een 2004scape/Client2-achtige (webpack-gebundelde)
+  client.
+- **Nog niet geïmplementeerd**: het daadwerkelijk versturen van de
+  snapshot naar een centraal dashboard — de data staat klaar via
+  `window.__telemetryPanel.getSnapshot()`, maar de verzendlaag volgt later.
+
+### Belangrijk: hoe de game-state uitlezen werkt
+
+Een client zoals `2004scape/Client2` is een webpack-gebundelde
+TypeScript-applicatie. De game-instantie (met `localPlayer`, `players[]`,
+`npcs[]`, etc.) leeft in module-scope en wordt **niet** standaard op
+`window` gezet — een extern geïnjecteerd script kan daar dus niet zomaar
+bij. Voor je eigen lokale build voeg je zelf één regel toe om een hook
+bloot te leggen, bijvoorbeeld in de `Game`-klasse:
+
+```ts
+(window as any).__gameState = this;
+```
+
+`telemetry-inject.js` polled periodiek een lijst met kandidaat-namen
+(`__gameState`, `game`, `client`) en gebruikt de eerste die bestaat. Zolang
+die hook er niet is, blijft het script geruisloos wachten — dit is exact
+hetzelfde patroon als referentietooling zoals `rs-sdk`, dat ook draait
+tegen een bewust "enhanced" lokale clientbuild in plaats van een
+ongewijzigde bundle.
 
 ## Structuur
 
 ```
-dev-dashboard/
+lostcity-automation/
 ├── package.json
 ├── tsconfig.json
 └── src/
@@ -33,7 +64,7 @@ dev-dashboard/
     │   ├── telemetry-pipeline.ts    # laadt/cachet het inject-script van disk
     │   └── index.ts                 # barrel export
     └── inject/
-        └── telemetry-inject.js      # leeg IIFE-scaffold, later te vullen
+        └── telemetry-inject.js      # leest localPlayer/players/npcs, resolver-based
 ```
 
 De applicatie die gemonitord wordt is een web-based HTML5/Canvas-client die
@@ -67,9 +98,8 @@ niets.
 ## Draaien
 
 ```bash
-cd dev-dashboard
 bun install
-TARGET_ORIGIN=https://legacy-app.example.com bun run dev
+TARGET_ORIGIN=http://localhost:PORT_VAN_JE_LOKALE_EMULATOR bun run dev
 ```
 
 ## Architectuurprincipes
