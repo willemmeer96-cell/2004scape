@@ -20,9 +20,14 @@ niet tegen een live publieke multiplayer-server.
   runtime-geheugen van de client. Zie de belangrijke kanttekening hieronder
   over hoe dit werkt bij een 2004scape/Client2-achtige (webpack-gebundelde)
   client.
-- **Nog niet geïmplementeerd**: het daadwerkelijk versturen van de
-  snapshot naar een centraal dashboard — de data staat klaar via
-  `window.__telemetryPanel.getSnapshot()`, maar de verzendlaag volgt later.
+- **Dashboard** (`src/telemetry/`): de injected script post elke tick zijn
+  snapshot naar `/__telemetry/ingest` op de gateway zelf (relatieve URL,
+  dus altijd same-origin, nooit naar de proxied upstream). De gateway
+  bewaart de laatste snapshot in het geheugen (`store.ts`) en exposeert 'm
+  via `GET /__telemetry/snapshot`, een live `GET /__telemetry/stream`
+  (SSE), en de dashboard-pagina zelf op `GET /__telemetry` — stat tiles,
+  een auto-fit minimap (lokale speler / spelers / npcs, gevalideerde
+  categorale kleuren) en een tabel-fallback.
 
 ### Belangrijk: hoe de game-state uitlezen werkt
 
